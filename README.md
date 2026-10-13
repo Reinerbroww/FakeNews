@@ -4,6 +4,8 @@
 
 ---
 
+> **Live App:** https://fakenews-ml.streamlit.app/
+
 ## Abstract
 
 The rapid proliferation of online disinformation has created an urgent need for automated systems capable of distinguishing authentic news content from fabricated articles. This project addresses that challenge by developing a machine learning-based classification system that determines whether a given news headline or article is likely **fake** or **authentic**. The system applies a systematic text-mining pipeline—spanning text preprocessing, statistical feature extraction, and supervised classification—under the **CRISP-DM** (Cross-Industry Standard Process for Data Mining) framework. Three classification algorithms were implemented and empirically evaluated: Logistic Regression, Multinomial Naive Bayes, and Linear Support Vector Machine (SVM). The **Linear SVM** model achieved the highest predictive performance, with an accuracy of **98.56%**, a precision of **97.86%**, a recall of **99.33%**, and an F1-score of **98.59%** on a held-out test set of 1,179 articles. The final model is deployed as an interactive web application built with **Streamlit**, enabling real-time classification of user-submitted text.
