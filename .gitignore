@@ -6,3 +6,6 @@ __pycache__/
 .DS_Store
 *.log
 .env
+
+# Large source corpus (234 MB) — obtain from Kaggle: saurabh00007/welfake-dataset
+dataset/WELFake_Dataset.csv

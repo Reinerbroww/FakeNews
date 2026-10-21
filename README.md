@@ -4,9 +4,11 @@
 
 ---
 
+> **Live App:** https://fakenews-ml.streamlit.app/
+
 ## Abstract
 
-The rapid proliferation of online disinformation has created an urgent need for automated systems capable of distinguishing authentic news content from fabricated articles. This project addresses that challenge by developing a machine learning-based classification system that determines whether a given news headline or article is likely **fake** or **authentic**. The system applies a systematic text-mining pipeline—spanning text preprocessing, statistical feature extraction, and supervised classification—under the **CRISP-DM** (Cross-Industry Standard Process for Data Mining) framework. Three classification algorithms were implemented and empirically evaluated: Logistic Regression, Multinomial Naive Bayes, and Linear Support Vector Machine (SVM). The **Linear SVM** model achieved the highest predictive performance, with an accuracy of **98.56%**, a precision of **97.86%**, a recall of **99.33%**, and an F1-score of **98.59%** on a held-out test set of 1,179 articles. The final model is deployed as an interactive web application built with **Streamlit**, enabling real-time classification of user-submitted text.
+The rapid proliferation of online disinformation has created an urgent need for automated systems capable of distinguishing authentic news content from fabricated articles. This project addresses that challenge by developing a machine learning-based classification system that determines whether a given news headline or article is likely **fake** or **authentic**. The system applies a systematic text-mining pipeline—spanning text preprocessing, statistical feature extraction, and supervised classification—under the **CRISP-DM** (Cross-Industry Standard Process for Data Mining) framework. The experiments are conducted on the **WELFake** corpus, a large-scale collection of 72,134 English-language political news articles. Three classification algorithms were implemented and empirically evaluated: Logistic Regression, Multinomial Naive Bayes, and Linear Support Vector Machine (SVM). The **Linear SVM** model achieved the highest predictive performance, with an accuracy of **95.65%**, a precision of **95.04%**, a recall of **95.37%**, and an F1-score of **95.21%** on a held-out test set of 12,726 articles. The final model is deployed as an interactive web application built with **Streamlit**, enabling real-time classification of user-submitted text.
 
 ---
 
@@ -43,7 +45,7 @@ Given an arbitrary news article or headline, the system must determine whether t
 
 - Develop a robust text-preprocessing pipeline that normalizes raw news content for downstream analysis.
 - Extract meaningful statistical features using **Term Frequency–Inverse Document Frequency (TF-IDF)** vectorization.
-- Train and compare multiple supervised classifiers on a balanced, labled dataset.
+- Train and compare multiple supervised classifiers on a large, labeled corpus.
 - Identify the optimal model on the basis of standard classification metrics (accuracy, precision, recall, and F1-score).
 - Deploy the selected model in an accessible, user-friendly web application.
 
@@ -64,27 +66,33 @@ The project adheres to the **CRISP-DM** (Cross-Industry Standard Process for Dat
 
 ### 5.1 Source & Composition
 
-The dataset comprises **6,000 English-language news articles** stored in a CSV file (`dataset/news_dataset.csv`). The class distribution is perfectly balanced, with **3,000 fake** and **3,000 real** articles, thereby obviating the need for class-imbalance correction techniques.
+The corpus is the **WELFake** dataset (`dataset/WELFake_Dataset.csv`), a public collection of **72,134 English-language political news articles** harvested from real and fake news sources. The distribution is mildly imbalanced toward the fake class, with **34,790 fake** and **28,836 real** articles after preprocessing — a ratio of roughly 54.7% / 45.3%. The imbalance is mild enough that no class-rebalancing strategy was required.
 
 ### 5.2 Schema
 
 | Attribute | Data Type | Description |
 |-----------|-----------|-------------|
+| `Unnamed: 0` | integer   | Original row index (dropped during ingestion) |
 | `title`   | string    | News article headline |
 | `text`    | string    | News article body |
-| `subject` | string    | Topical category of the article |
-| `date`    | string    | Publication date |
 | `label`   | integer   | Class label: `0` = Fake, `1` = Real |
 
 ### 5.3 Quality Checks & Preparation
 
 | Check | Outcome |
 |-------|---------|
-| Missing values | None across all attributes |
-| Empty `text` values | 66 articles; retained because titles still contained information |
-| Duplicate rows (title + text) | 108; removed (keeping the first occurrence) |
-| Post-cleaning size | 5,892 rows |
-| Final dataset after preprocessing | 5,891 articles (one row discarded for empty processed text) |
+| Raw dataset size | 72,134 rows × 4 columns |
+| Missing `title` | 558 articles |
+| Missing `text` | 39 articles |
+| Missing `label` | 0 |
+| Rows with **both** `title` and `text` missing | 0 — no row is removed by the missing-value rule |
+| Whitespace-only `text` cells | 744 — normalized to `pd.NA` during preparation |
+| Duplicate rows (all columns) | 0 |
+| Duplicate rows (title + text) | 0 on the raw read; **8,458 after** whitespace/empty-string normalization |
+| Duplicate titles only | 9,795 before de-duplication; 1,337 remain afterwards and are retained, as identical headlines may carry different bodies |
+| After de-duplication | 63,676 rows |
+| Articles with empty processed text | 50 — discarded (non-textual or non-Latin content) |
+| Final dataset after preprocessing | **63,626 articles** |
 
 The `title` and `text` attributes were concatenated into a composite feature, `full_text`, to leverage both the headline and the body as predictive signals.
 
@@ -99,7 +107,9 @@ Raw text is transformed into a canonical form through a sequential normalization
 5. **Lemmatization** — Tokens are reduced to their dictionary base forms using `WordNetLemmatizer` (e.g., *bigots* → *bigot*).
 6. **Reassembly** — Lemmatized tokens are rejoined into a single processed document (`final_text`) that serves as the input to feature extraction.
 
-> **Example:** *"WATCH: Trump Just Told All The Anti-Gay Bigots And Mike Pence..."* → `watch trump told anti gay bigot mike penny go f ck whole lot`
+> **Example:** *"LAW ENFORCEMENT ON HIGH ALERT Following Threats Against Cops And Whites..."* → `law enforcement high alert following threat cop white blacklivesmatter fyf terrorist video comment expected barack obama member fyf fukyoflag ...`
+
+The deployed application reproduces this pipeline **exactly**, character for character, so that inference-time text is transformed identically to training-time text.
 
 ## 7. Feature Extraction & Selection
 
@@ -107,53 +117,68 @@ Raw text is transformed into a canonical form through a sequential normalization
 
 Processed documents are converted into numerical feature vectors via **TF-IDF** weighting, which captures both the frequency of a term within a document (Term Frequency) and its rarity across the corpus (Inverse Document Frequency):
 
-- **Matrix dimensions:** `(5,891 × 42,963)` — representing 5,891 documents and 42,963 unique vocabulary terms.
-- **Data split:** 80/20 stratified train/test partition (4,712 training and 1,179 testing articles), preserving class proportions.
+- **Vectorizer:** `TfidfVectorizer(max_features=50_000)` — unigrams, L2 normalization, smooth IDF.
+- **Matrix dimensions:** `(50,900 × 50,000)` — representing 50,900 training documents and 50,000 selected vocabulary terms.
+- **Data split:** 80/20 stratified train/test partition (50,900 training and 12,726 testing articles), preserving class proportions.
 
 ### 7.2 Feature Selection Experiment
 
-An auxiliary experiment evaluated `SelectKBest` feature selection with the **chi-squared (χ²)** statistic, reducing the feature space to 5,000 terms (an 88% reduction). This yielded a modest accuracy decline (98.56% → 98.05%), indicating the pipeline's robustness. The full-feature model was ultimately retained for deployment due to its superior performance.
+An auxiliary experiment evaluated `SelectKBest` feature selection with the **chi-squared (χ²)** statistic, reducing the feature space from 50,000 to 5,000 terms (a 90% reduction). This yielded a modest accuracy decline (95.65% → 95.27%), indicating the pipeline's robustness. The full-feature model was ultimately retained for deployment due to its superior performance.
 
 ## 8. Modeling & Evaluation
 
-Three supervised classifiers were trained using the extracted features and evaluated on the held-out test set.
+Three supervised classifiers were trained using the extracted features and evaluated on the held-out test set of 12,726 articles.
+
+> **Metric convention:** as implemented in the research notebook, the reported precision, recall, and F1-score are computed for the positive class (`1` = Real News, `average="binary"`); the accuracy is computed over the full test set. Per-class precision/recall/F1 for both classes is additionally reported through the classification report.
 
 ### 8.1 Baseline: Logistic Regression
 
 | Metric | Value |
 |--------|-------|
-| Accuracy | 96.95% |
-| Precision | 95.62% |
-| Recall | 98.50% |
-| F1-Score | 97.04% |
+| Accuracy | 94.66% |
+| Precision | 94.24% |
+| Recall | 93.97% |
+| F1-Score | 94.11% |
 
 ### 8.2 Multinomial Naive Bayes
 
 | Metric | Value |
 |--------|-------|
-| Accuracy | 92.11% |
-| Precision | 89.41% |
-| Recall | 95.83% |
-| F1-Score | 92.51% |
+| Accuracy | 86.00% |
+| Precision | 85.36% |
+| Recall | 83.41% |
+| F1-Score | 84.37% |
 
 ### 8.3 Selected Model: Linear SVM
 
 | Metric | Value |
 |--------|-------|
-| **Accuracy** | **98.56%** |
-| **Precision** | **97.86%** |
-| **Recall** | **99.33%** |
-| **F1-Score** | **98.59%** |
+| **Accuracy** | **95.65%** |
+| **Precision** | **95.04%** |
+| **Recall** | **95.37%** |
+| **F1-Score** | **95.21%** |
 
 ### 8.4 Comparative Summary
 
 | Model | Accuracy | Precision | Recall | F1-Score |
 |-------|:--------:|:---------:|:------:|:--------:|
-| Logistic Regression | 96.95% | 95.62% | 98.50% | 97.04% |
-| Multinomial Naive Bayes | 92.11% | 89.41% | 95.83% | 92.51% |
-| **Linear SVM** | **98.56%** | **97.86%** | **99.33%** | **98.59%** |
+| Logistic Regression | 94.66% | 94.24% | 93.97% | 94.11% |
+| Multinomial Naive Bayes | 86.00% | 85.36% | 83.41% | 84.37% |
+| **Linear SVM** | **95.65%** | **95.04%** | **95.37%** | **95.21%** |
 
-The **Linear SVM** classifier misclassified only **17 of 1,179** test articles, outperforming both baselines across every metric and is therefore designated the production model. The trained model and its corresponding TF-IDF vectorizer are persisted as serialized artifacts (`linear_svm_model.pkl` and `tfidf_vectorizer.pkl`) via `joblib`.
+**Confusion matrices** (rows = true class, columns = predicted class):
+
+```
+Logistic Regression              Linear SVM (deployed)
+              Predicted                     Predicted
+              Fake   Real                  Fake   Real
+Actual Fake  [ 6627   331 ]        Actual Fake  [ 6672   286 ]
+       Real  [  348  5420 ]               Real  [  271  5497 ]
+```
+
+The **Linear SVM** classifier misclassified only **557 of 12,726** test articles, outperforming both baselines across every metric, and is therefore designated the production model. The trained model and its corresponding TF-IDF vectorizer are persisted as serialized artifacts (`WELF_linear_svm_model.pkl` and `WELF_tfidf_vectorizer.pkl`) via `joblib`.
+
+> **Note on run-to-run variance:** the confusion matrices above come from an independent re-execution of the identical pipeline. The `liblinear` dual solver is not bit-deterministic, so a re-run shifts two or three borderline articles (557 vs. 555 misclassifications, i.e. ±0.02 accuracy points). The headline metrics (95.65% accuracy) are the values recorded in the research notebook.
 
 ## 9. Web Application
 
@@ -170,16 +195,20 @@ The interface features a clean, custom-styled user experience (Manrope typograph
 
 ```
 FakeNews/
-├── app.py                          # Streamlit web application
+├── app.py                          # Streamlit web application (deployed model)
 ├── requirements.txt                # Python dependencies
+├── README.md                       # Project documentation (English)
+├── ANALYSIS.md                     # Detailed technical analysis (Indonesian)
 ├── dataset/
-│   └── news_dataset.csv            # Labeled training corpus (6,000 articles)
+│   ├── WELFake_Dataset.csv         # WELFake corpus (72,134 rows) — active
+│   └── news_dataset.csv            # Legacy corpus (6,000 rows) — retained for reference
 ├── models/
-│   ├── linear_svm_model.pkl        # Trained Linear SVM classifier
-│   └── tfidf_vectorizer.pkl        # Fitted TF-IDF vectorizer
+│   ├── WELF_linear_svm_model.pkl   # Deployed Linear SVM classifier (WELFake)
+│   ├── WELF_tfidf_vectorizer.pkl   # Fitted TF-IDF vectorizer (WELFake)
+│   ├── linear_svm_model.pkl        # Legacy classifier (news_dataset)
+│   └── tfidf_vectorizer.pkl        # Legacy vectorizer (news_dataset)
 ├── notebook/
 │   └── fake_news_detection.ipynb   # Jupyter notebook (full pipeline)
-└── ANALYSIS.md                     # Detailed technical analysis (Indonesian)
 ```
 
 ## 11. Installation & Usage
@@ -210,21 +239,28 @@ streamlit run app.py
 
 The application will open in your default browser at `http://localhost:8501`. Paste a news headline or article into the text area and select **Analyze News** to obtain a prediction.
 
+> **Note on the corpus:** `WELFake_Dataset.csv` is ~245 MB and is therefore not committed to the repository. Download the WELFake dataset from Kaggle (`saurabh00007/welfake-dataset`) and place it in `dataset/`. The serialized model and vectorizer are already included, so the web application runs without the raw corpus.
+
+The application requires the NLTK corpora `stopwords`, `wordnet`, `punkt`, and `punkt_tab`; these are fetched automatically on first launch.
+
 ## 12. Results Summary
 
 | Aspect | Detail |
 |--------|--------|
+| Corpus | WELFake (72,134 articles → 63,626 after preprocessing) |
 | Best-performing model | **Linear SVM** |
-| Highest accuracy | **98.56%** |
-| TF-IDF feature space | 42,963 features |
-| Train / test split | 4,712 / 1,179 (80/20, stratified) |
-| Final dataset size | 5,891 articles |
+| Highest accuracy | **95.65%** |
+| TF-IDF feature space | 50,000 features |
+| Train / test split | 50,900 / 12,726 (80/20, stratified) |
+| Class distribution | 54.7% Fake / 45.3% Real |
 | Methodology | CRISP-DM |
 | Deployment | Streamlit web application |
 
 ## 13. Limitations
 
-- The model is trained exclusively on English-language news content and may generalize poorly to other languages or domains.
+- The model is trained exclusively on English-language political news content and may generalize poorly to other languages or domains.
+- The WELFake corpus contains provocative and occasionally offensive language, since it aggregates material from real disinformation campaigns; this affects the vocabulary learned by the model.
+- Because the classifier was trained on concatenated title-and-body documents, **headline-only** inputs are out of distribution and noticeably less reliable (roughly 68% accuracy on titles alone versus 95%+ on full articles). The application is most accurate when given a complete article.
 - Classifications reflect statistical patterns in the training data and are **not** definitive determinations of veracity.
 - Predictions should be corroborated against reliable, independent sources before being shared.
 

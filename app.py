@@ -8,11 +8,6 @@ from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 from nltk.tokenize import word_tokenize
 
-
-# =========================================================
-# PAGE CONFIGURATION
-# =========================================================
-
 st.set_page_config(
     page_title="Fake News Detection",
     page_icon="📰",
@@ -21,19 +16,11 @@ st.set_page_config(
 )
 
 
-# =========================================================
-# PATH CONFIGURATION
-# =========================================================
-
 BASE_DIR = Path(__file__).resolve().parent
 
-MODEL_PATH = BASE_DIR / "models" / "linear_svm_model.pkl"
-VECTORIZER_PATH = BASE_DIR / "models" / "tfidf_vectorizer.pkl"
+MODEL_PATH = BASE_DIR / "models" / "WELF_linear_svm_model.pkl"
+VECTORIZER_PATH = BASE_DIR / "models" / "WELF_tfidf_vectorizer.pkl"
 
-
-# =========================================================
-# NLTK RESOURCES
-# =========================================================
 
 @st.cache_resource
 def load_nltk_resources():
@@ -67,10 +54,6 @@ def load_nltk_resources():
 
 stop_words, lemmatizer = load_nltk_resources()
 
-
-# =========================================================
-# LOAD MODEL
-# =========================================================
 
 @st.cache_resource
 def load_model():
@@ -118,28 +101,24 @@ def load_model():
 model, vectorizer = load_model()
 
 
-# =========================================================
-# TEXT PREPROCESSING
-# =========================================================
-
 def preprocess_text(text):
 
     text = text.lower()
 
     text = re.sub(
-        r"https?://\S+|www\.\S+",
-        " ",
+        r"http\S+|www\S+|https\S+",
+        "",
         text
     )
 
     text = re.sub(
         r"\d+",
-        " ",
+        "",
         text
     )
 
     text = re.sub(
-        r"[^a-z\s]",
+        r"[^a-zA-Z\s]",
         " ",
         text
     )
@@ -165,10 +144,6 @@ def preprocess_text(text):
 
     return " ".join(tokens)
 
-
-# =========================================================
-# CUSTOM CSS
-# =========================================================
 
 CSS = """
 <style>
@@ -556,10 +531,6 @@ html, body, [class*="css"] {
 st.html(CSS)
 
 
-# =========================================================
-# HERO
-# =========================================================
-
 HERO_HTML = """
 <div class="hero">
     <div class="hero-badge">
@@ -598,10 +569,6 @@ HEADER_HTML = """
 st.html(HEADER_HTML)
 
 
-# =========================================================
-# INPUT
-# =========================================================
-
 news_text = st.text_area(
     "News Content",
     height=220,
@@ -612,19 +579,11 @@ news_text = st.text_area(
 )
 
 
-# =========================================================
-# ANALYZE BUTTON
-# =========================================================
-
 predict_button = st.button(
     "Analyze News",
     use_container_width=True
 )
 
-
-# =========================================================
-# PREDICTION
-# =========================================================
 
 if predict_button:
 
@@ -809,17 +768,13 @@ if predict_button:
         st.html(RESULT_HTML)
 
 
-# =========================================================
-# FOOTER
-# =========================================================
-
 FOOTER_HTML = """
 <div class="footer">
     <div class="footer-brand">
         Fake News Detection
     </div>
     <div class="footer-tech">
-        TF-IDF · Linear SVM
+        WELFake · TF-IDF · Linear SVM
     </div>
 </div>
 """

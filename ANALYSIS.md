@@ -14,8 +14,8 @@ Dokumen ini menjelaskan secara lengkap alur kerja (*pipeline*) proyek Fake News 
 │  1. Business Understanding                                      │
 │     │                                                           │
 │     ▼                                                           │
-│  2. Data Understanding ──► Dataset 6.000 artikel berita         │
-│     │                     (Fake: 3.000 / Real: 3.000)           │
+│  2. Data Understanding ──► Dataset WELFake 72.134 artikel       │
+│     │                     (Fake: 34.790 / Real: 28.836)         │
 │     ▼                                                           │
 │  3. Data Preparation                                            │
 │     ├── Missing values handling                                 │
@@ -33,13 +33,13 @@ Dokumen ini menjelaskan secara lengkap alur kerja (*pipeline*) proyek Fake News 
 │     └── Final text assembly                                     │
 │     │                                                           │
 │     ▼                                                           │
-│  5. Feature Extraction (TF-IDF)                                 │
+│  5. Feature Extraction (TF-IDF, 50.000 fitur)                   │
 │     │                                                           │
 │     ▼                                                           │
 │  6. Modeling & Evaluation                                       │
-│     ├── Logistic Regression  (96.95% accuracy)                  │
-│     ├── Naive Bayes          (92.11% accuracy)                  │
-│     ├── Linear SVM           (98.56% accuracy) ──► BEST MODEL   │
+│     ├── Logistic Regression  (94.66% accuracy)                  │
+│     ├── Naive Bayes          (86.00% accuracy)                  │
+│     ├── Linear SVM           (95.65% accuracy) ──► BEST MODEL   │
 │     └── Feature Selection (Chi-Square) experiment               │
 │     │                                                           │
 │     ▼                                                           │
@@ -66,50 +66,47 @@ Dokumen ini menjelaskan secara lengkap alur kerja (*pipeline*) proyek Fake News 
 
 ### 2.1 Sumber Dataset
 
-Dataset tersimpan dalam format CSV (`news_dataset.csv`) dengan **6.000 artikel berita** berbahasa Inggris.
+Dataset yang digunakan adalah korpus **WELFake** (`dataset/WELFake_Dataset.csv`) yang berisi **72.134 artikel berita** berbahasa Inggris dengan topik politik, dihimpun dari sumber berita asli dan sumber berita palsu.
 
 ### 2.2 Struktur Dataset
 
 | Atribut | Tipe Data | Keterangan |
 |---------|-----------|------------|
+| `Unnamed: 0` | integer | Indeks baris asli (dihapus saat ingestion) |
 | `title` | string | Judul artikel berita |
 | `text` | string | Isi artikel berita |
-| `subject` | string | Kategori topik berita |
-| `date` | string | Tanggal publikasi |
 | `label` | integer | 0 = Fake, 1 = Real |
 
 ### 2.3 Hasil Pemeriksaan Awal
 
 | Pemeriksaan | Hasil |
 |---|---|
-| Ukuran dataset | 6.000 baris x 5 kolom |
-| Missing values | 0 pada seluruh kolom |
-| Empty values (`text`) | 66 artikel kosong |
-| Duplikat (title + text) | 108 data |
-| Duplikat (seluruh baris) | 5 data |
+| Ukuran dataset | 72.134 baris x 4 kolom |
+| Missing values (`title`) | 558 artikel |
+| Missing values (`text`) | 39 artikel |
+| Missing values (`label`) | 0 |
+| Baris dengan `title` **dan** `text` kosong sekaligus | 0 baris |
+| Sel `text` berisi spasi saja | 744 sel |
+| Duplikat (seluruh baris) | 0 data |
+| Duplikat (title + text) pada data mentah | 0 data |
+| Duplikat (title + text) setelah normalisasi | 8.458 data |
+| Duplikat (title saja) | 9.795 data → 1.337 data setelah de-duplikasi |
 
 ### 2.4 Distribusi Kelas
 
+Setelah tahap data preparation dan text preprocessing:
+
 ```
 Label
-0 (Fake News)  : 3.000  (50%)
-1 (Real News)  : 3.000  (50%)
+0 (Fake News)  : 34.790  (54.68%)
+1 (Real News)  : 28.836  (45.32%)
 ```
 
-Dataset seimbang (*balanced*), sehingga tidak diperlukan teknik penanganan *class imbalance*.
+Dataset relatif seimbang (*balanced*), sehingga tidak diperlukan teknik penanganan *class imbalance* yang signifikan.
 
-### 2.5 Distribusi Kategori (Subject)
+### 2.5 Catatan Karakteristik Korpus
 
-```
-politicsNews       1.564
-worldnews          1.436
-News               1.175
-politics             870
-left-news            573
-Government News      185
-Middle-east          100
-US_News               97
-```
+Korpus WELFake mengandung berita politik yang provokatif dan sesekali menggunakan bahasa yang menusuk, karena menghimpun materi dari kampanye disinformasi sesungguhnya. Karakteristik ini turut membentuk kosakata yang dipelajari model.
 
 ---
 
@@ -117,19 +114,25 @@ US_News               97
 
 ### 3.1 Penanganan Missing Values
 
-Seluruh atribut tidak memiliki nilai `null`, sehingga tidak diperlukan penanganan tambahan.
+Terdapat 558 artikel tanpa judul (`title`) dan 39 artikel tanpa isi (`text`), namun **tidak ada baris yang kehilangan keduanya sekaligus**. Karena itu, aturan `dropna(subset=["title", "text"], how="all")` tidak menghapus satu pun baris. Artikel dengan hanya salah satu dari keduanya **dipertahankan**, karena judul yang masih lengkap menyediakan informasi yang dapat diekstraksi.
 
 ### 3.2 Penanganan Empty Values
 
-Terdapat 66 artikel dengan kolom `text` kosong. Karena judul (`title`) masih mengandung informasi, artikel tersebut **tidak dihapus** dan kolom `text` dibiarkan kosong.
+Terdapat 744 sel `text` yang hanya berisi spasi (kosong secara semantik). Pada tahap persiapan, kolom `title` dan `text` dinormalisasi: setiap nilai di-*trim* dari spasi berlebih, dan string kosong diubah menjadi `pd.NA` agar konsisten diperlakukan sebagai data hilang.
+
+```python
+for col in ["title", "text"]:
+    df[col] = df[col].astype("string").str.strip()
+    df[col] = df[col].replace("", pd.NA)
+```
 
 ### 3.3 Penghapusan Duplikat
 
-Data duplikat dihapus berdasarkan kombinasi `title` + `text` (*keep first*). Setelah penanganan:
+Pada data mentah tidak ditemukan duplikat pada kombinasi `title` + `text`. Namun, setelah normalisasi whitespace dan penyamaan nilai kosong di atas, **8.458 baris** menjadi identik dan dihapus (*keep first*). Duplikat berdasarkan judul saja (1.337 data setelah de-duplikasi) **dipertahankan** karena judul yang sama belum tentu memiliki isi yang sama. Setelah penanganan:
 
 ```
-Ukuran dataset: (5.892, 5)
-Duplikat tersisa: 0
+Ukuran dataset: (63.676, 4)
+Duplikat (title + text) tersisa: 0
 ```
 
 ### 3.4 Penggabungan Fitur Teks
@@ -137,8 +140,14 @@ Duplikat tersisa: 0
 Atribut `title` dan `text` digabungkan menjadi kolom baru `full_text`:
 
 ```python
-df["full_text"] = (df["title"] + " " + df["text"]).str.strip()
+df["full_text"] = (
+    df["title"].fillna("").astype(str).str.strip()
+    + " "
+    + df["text"].fillna("").astype(str).str.strip()
+).str.strip()
 ```
+
+Pada tahap ini belum ada baris dengan `full_text` kosong.
 
 ---
 
@@ -151,8 +160,8 @@ Tahap preprocessing bertujuan membersihkan dan menyiapkan teks agar siap diekstr
 Mengubah seluruh teks menjadi huruf kecil.
 
 ```
-Sebelum : WATCH: Trump Just Told All The Anti-Gay Bigots...
-Sesudah : watch: trump just told all the anti gay bigots...
+Sebelum : LAW ENFORCEMENT ON HIGH ALERT Following Threats Against Cops...
+Sesudah : law enforcement on high alert following threats against cops...
 ```
 
 ### 4.2 Text Cleaning
@@ -171,8 +180,8 @@ Menghapus elemen yang tidak diperlukan menggunakan regex:
 Memecah teks menjadi array kata (*tokens*) menggunakan `nltk.word_tokenize()`.
 
 ```
-Sebelum : "watch trump just told all the anti gay bigots"
-Sesudah : ["watch", "trump", "just", "told", "all", "the", "anti", "gay", "bigots"]
+Sebelum : "law enforcement on high alert following threats against cops"
+Sesudah : ["law", "enforcement", "on", "high", "alert", "following", ...]
 ```
 
 ### 4.4 Stopword Removal
@@ -180,8 +189,8 @@ Sesudah : ["watch", "trump", "just", "told", "all", "the", "anti", "gay", "bigot
 Menghapus kata-kata umum (stopword) dari NLTK English corpus: *the, is, and, of, to, in, a, it*, dsb.
 
 ```
-Sebelum : ["watch", "trump", "just", "told", "all", "the", "anti", "gay", "bigots"]
-Sesudah : ["watch", "trump", "told", "anti", "gay", "bigots"]
+Sebelum : ["law", "enforcement", "on", "high", "alert", "following", "threats", ...]
+Sesudah : ["law", "enforcement", "high", "alert", "following", "threats", ...]
 ```
 
 ### 4.5 Lemmatization
@@ -198,13 +207,13 @@ Sesudah : ["bigot", "voter", "right", "reason", "christian"]
 Token hasil lemmatization digabungkan kembali menjadi teks utuh (`final_text`) sebagai input TF-IDF.
 
 ```
-Sebelum (raw) : WATCH: Trump Just Told All The Anti-Gay Bigots And Mike Pence...
-Sesudah (final): watch trump told anti gay bigot mike penny go f ck whole lot...
+Sebelum (raw) : LAW ENFORCEMENT ON HIGH ALERT Following Threats Against Cops And Whites On 9-11...
+Sesudah (final): law enforcement high alert following threat cop white blacklivesmatter fyf terrorist...
 ```
 
 ### 4.7 Penanganan Akhir
 
-Satu artikel yang hanya berisi URL gambar menghasilkan `final_text` kosong dan dihapus. Dataset akhir: **5.891 artikel**.
+Sebanyak **50 artikel** menghasilkan `final_text` kosong (misalnya artikel yang hanya berisi URL gambar atau teks non-Latin yang seluruh karakternya hilang saat *cleaning*). Data tersebut dihapus. Dataset akhir: **63.626 artikel**.
 
 ---
 
@@ -217,89 +226,101 @@ Satu artikel yang hanya berisi URL gambar menghasilkan `final_text` kosong dan d
 - **TF (Term Frequency):** Frekuensi kemunculan kata dalam satu dokumen.
 - **IDF (Inverse Document Frequency):** Mengurangi bobot kata yang terlalu umum muncul di banyak dokumen.
 
+Konfigurasi yang digunakan:
+
+```python
+tfidf_vectorizer = TfidfVectorizer(max_features=50000)
+```
+
 ### 5.2 Hasil Ekstraksi
 
 ```
-Ukuran matriks TF-IDF : (5.891, 42.963)
-- 5.891 = jumlah artikel
-- 42.963 = jumlah fitur (kata unik)
+Ukuran matriks TF-IDF (training) : (50.900, 50.000)
+Ukuran matriks TF-IDF (testing)  : (12.726, 50.000)
+- 50.000 = jumlah fitur maksimum (kata unik terpilih)
 ```
 
 ### 5.3 Pembagian Data
 
 ```
-Training (80%) : 4.712 artikel
-Testing  (20%) : 1.179 artikel
-Stratify       : proporsi label tetap seimbang
+Training (80%) : 50.900 artikel
+Testing  (20%) : 12.726 artikel
+Stratify       : proporsi label tetap terjaga
 ```
+
+Distribusi label pada data testing: Fake 6.958 artikel, Real 5.768 artikel.
 
 ---
 
 ## 6. Modeling & Evaluation
 
-Tiga algoritma klasifikasi diuji dan dibandingkan:
+Tiga algoritma klasifikasi diuji dan dibandingkan.
+
+> **Konvensi metrik:** precision, recall, dan F1-score yang dilaporkan di bawah dihitung untuk kelas positif (`1` = Real News, `average="binary"`), sedangkan accuracy dihitung untuk seluruh data testing. Nilai per-kelas (precision, recall, F1) untuk Fake dan Real tersedia melalui *classification report*.
 
 ### 6.1 Logistic Regression (Baseline)
 
 | Metrik | Nilai |
 |--------|-------|
-| Accuracy | 96.95% |
-| Precision | 95.62% |
-| Recall | 98.50% |
-| F1-Score | 97.04% |
+| Accuracy | 94.66% |
+| Precision | 94.24% |
+| Recall | 93.97% |
+| F1-Score | 94.11% |
 
 **Confusion Matrix:**
 ```
               Predicted
               Fake   Real
-Actual Fake  [ 553    27 ]
-       Real  [   9   590 ]
+Actual Fake  [ 6627   331 ]
+       Real  [  348  5420 ]
 ```
-*36 artikel salah klasifikasi dari 1.179 total.*
+*679 artikel salah klasifikasi dari 12.726 total.*
 
 ### 6.2 Multinomial Naive Bayes
 
 | Metrik | Nilai |
 |--------|-------|
-| Accuracy | 92.11% |
-| Precision | 89.41% |
-| Recall | 95.83% |
-| F1-Score | 92.51% |
+| Accuracy | 86.00% |
+| Precision | 85.36% |
+| Recall | 83.41% |
+| F1-Score | 84.37% |
 
 **Confusion Matrix:**
 ```
               Predicted
               Fake   Real
-Actual Fake  [ 512    68 ]
-       Real  [  25   574 ]
+Actual Fake  [ 6133   825 ]
+       Real  [  957  4811 ]
 ```
-*93 artikel salah klasifikasi — performa paling rendah di antara ketiga model.*
+*1.782 artikel salah klasifikasi — performa paling rendah di antara ketiga model.*
 
 ### 6.3 Linear SVM (Model Terpilih)
 
 | Metrik | Nilai |
 |--------|-------|
-| **Accuracy** | **98.56%** |
-| **Precision** | **97.86%** |
-| **Recall** | **99.33%** |
-| **F1-Score** | **98.59%** |
+| **Accuracy** | **95.65%** |
+| **Precision** | **95.04%** |
+| **Recall** | **95.37%** |
+| **F1-Score** | **95.21%** |
 
 **Confusion Matrix:**
 ```
               Predicted
               Fake   Real
-Actual Fake  [ 567    13 ]
-       Real  [   4   595 ]
+Actual Fake  [ 6672   286 ]
+       Real  [  271  5497 ]
 ```
-*Hanya 17 artikel salah klasifikasi — performa terbaik.*
+*Hanya 557 artikel salah klasifikasi — performa terbaik.*
 
 ### 6.4 Ringkasan Perbandingan
 
 | Model | Accuracy | Precision | Recall | F1-Score |
 |-------|----------|-----------|--------|----------|
-| Logistic Regression | 96.95% | 95.62% | 98.50% | 97.04% |
-| Naive Bayes | 92.11% | 89.41% | 95.83% | 92.51% |
-| **Linear SVM** | **98.56%** | **97.86%** | **99.33%** | **98.59%** |
+| Logistic Regression | 94.66% | 94.24% | 93.97% | 94.11% |
+| Naive Bayes | 86.00% | 85.36% | 83.41% | 84.37% |
+| **Linear SVM** | **95.65%** | **95.04%** | **95.37%** | **95.21%** |
+
+> **Catatan variasi antar-jalankan:** confusion matrix di atas berasal dari eksekusi ulang pipeline yang identik. Solver *liblinear* tidak deterministik secara bit-per-bit, sehingga beberapa artikel batas (557 vs. 555 salah klasifikasi, selisih ±0,02 poin akurasi) dapat berpindah. Nilai utama pada tabel merupakan hasil yang tercatat pada notebook.
 
 ---
 
@@ -310,18 +331,18 @@ Pengujian dilakukan untuk melihat apakah mengurangi jumlah fitur dapat mempertah
 ### 7.1 Konfigurasi
 
 - Metode: `SelectKBest` dengan `chi2`
-- Fitur dipilih: **5.000** dari 42.963
+- Fitur dipilih: **5.000** dari 50.000 (penurunan 90%)
 
 ### 7.2 Hasil
 
 | Metrik | Tanpa FS | Dengan FS (5.000 fitur) |
 |--------|----------|------------------------|
-| Accuracy | 98.56% | 98.05% |
-| Precision | 97.86% | 97.37% |
-| Recall | 99.33% | 98.83% |
-| F1-Score | 98.59% | 98.09% |
+| Accuracy | 95.65% | 95.27% |
+| Precision | 95.04% | 94.81% |
+| Recall | 95.37% | 94.75% |
+| F1-Score | 95.21% | 94.78% |
 
-Feature selection mengurangi fitur drastis (88%) dengan penurunan performa hanya ~0.5%. Namun, **model tanpa feature selection tetap dipilih** karena memberikan performa tertinggi.
+Feature selection mengurangi fitur drastis (90%) dengan penurunan performa hanya ~0.38 poin persentase. Namun, **model tanpa feature selection tetap dipilih** karena memberikan performa tertinggi.
 
 ---
 
@@ -332,8 +353,8 @@ Feature selection mengurangi fitur drastis (88%) dengan penurunan performa hanya
 Model dan vectorizer disimpan menggunakan `joblib`:
 
 ```python
-joblib.dump(tfidf_vectorizer, "tfidf_vectorizer.pkl")
-joblib.dump(model_svm, "linear_svm_model.pkl")
+joblib.dump(tfidf_vectorizer, "../models/WELF_tfidf_vectorizer.pkl")
+joblib.dump(svm_model, "../models/WELF_linear_svm_model.pkl")
 ```
 
 ### 8.2 Streamlit Application
@@ -358,6 +379,8 @@ Linear SVM Prediction
 Output: "Likely Fake" / "Likely Authentic"
 ```
 
+Fungsi preprocessing pada aplikasi (`app.py`) dibuat identik dengan pipeline pada notebook, sehingga inferensi konsisten dengan data training. Model, vectorizer, dan resource NLTK dimuat satu kali lalu di-*cache* (`st.cache_resource`).
+
 ### 8.3 Fitur Aplikasi
 
 - UI yang bersih dengan custom CSS (font Manrope, palet biru-merah)
@@ -371,10 +394,11 @@ Output: "Likely Fake" / "Likely Authentic"
 
 | Aspek | Detail |
 |-------|--------|
+| Korpus | WELFake (72.134 → 63.626 artikel) |
 | Model Terbaik | **Linear SVM** |
-| Accuracy Tertinggi | **98.56%** |
-| Total Fitur TF-IDF | 42.963 |
-| Data Training/Testing | 4.712 / 1.179 (80/20 split) |
-| Dataset Akhir | 5.891 artikel |
+| Accuracy Tertinggi | **95.65%** |
+| Total Fitur TF-IDF | 50.000 |
+| Data Training/Testing | 50.900 / 12.726 (80/20 split) |
+| Distribusi Kelas | 54.68% Fake / 45.32% Real |
 | Framework | CRISP-DM |
 | Deployment | Streamlit |
